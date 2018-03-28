@@ -13,7 +13,7 @@ case "$1" in
 	-*) die "Error: Unknown Option: $1" ;;
 esac
 
-LOGDIR="$(dirname $0)/logs"
+LOGDIR="$(dirname $0)/_logs"
 OUTLOG="${LOGDIR}/${thisName%.sh}.out.log"
 [ -d "${LOGDIR}" ] || mkdir -p "${LOGDIR}"
 [ -d "${LOGDIR}" ] || die "Error: Log directory dNE: ${LOGDIR}"
@@ -33,10 +33,12 @@ commit_msg=''
 
 #----------------
 deploy(){
+	logThis "Deploying"
 	cp -a $object_files "${install_dir}"
 }
 
 save_to_git(){
+	logThis "Saving to Git repo"
 	git commit -am $commit_msg
 }
 

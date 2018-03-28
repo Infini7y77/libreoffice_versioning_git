@@ -137,14 +137,34 @@ def _git_commit_with_add(repo, msg, init=False):
 
 #--------------------------------------------------
 
+def _find_replace(sobj, find_items, replacement):
+	flag_found = False
+	for wo in find_items:
+		if sobj.find(wo) > 0:
+			flag_found = True
+			sobj = sobj.replace(wo,replacement)
+	return sobj, flag_found
+
+def _find_replace_pairs(sobj, find_replace_pairs):
+	flag_found = False
+	for wo,wi in find_replace_pairs:
+		if sobj.find(wo) > 0:
+			flag_found = True
+			sobj = sobj.replace(wo,wi)
+	return sobj, flag_found
+
 def get_versioning_dir_name(model, suffix='versions'):
 	""" """
 	# Filename used for versioning subdirectory name
 	path, fn = _url_to_path_file(model.getURL())
-	for wo,wi in ((' ','_'),('.odt',''),('.fodt',''),('.ods',''),('.fods','')):
-		fn = fn.replace(wo,wi)
-	if path and fn:
-		return os.path.join(path,'{}__{}'.format(fn,suffix))
+	replace_what_with = ((' ','_'),
+					  ('.odt',''),('.fodt',''),
+					  ('.ods',''),('.fods',''),
+					  ('.doc',''),('.docx',''),
+					  )
+	_fn,_ = _find_replace_pairs(fn, replace_what_with)
+	if path and _fn:
+		return os.path.join(path,'{}__{}'.format(_fn,suffix))
 	return None
 
 def setup_version_dir(vpath):
@@ -192,25 +212,34 @@ def store_to_URL(model, url, filtertype, overwrite=True, extra_properties=None):
 def store_to_flat_XML(model, vpath):
 	_, fn = _url_to_path_file(model.getURL())
 	#TODO: check type using model
-	fn = fn.replace('.odt','.fodt')
-	return store_to_URL(model, _url_ify(vpath,fn), 'fodt')
+	extn = '.fodt'
+	_fn, flag_found = _find_replace(fn, ('.odt','.fodt','.doc','.docx'), extn)
+	if flag_found:
+		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
+
+	extn = '.fods'
+	_fn, flag_found = _find_replace(fn, ('.ods','.fods','.xls','.xlsx'), extn)
+	if flag_found:
+		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
+
+	return False
 
 def store_to_text(model, vpath):
 	_, fn = _url_to_path_file(model.getURL())
 	#TODO: check type using model
-	if fn.find('.odt') > 0 or fn.find('.fodt') > 0:
-		fn = fn.replace('.odt','.txt')
-		fn = fn.replace('.fodt','.txt')
-		return store_to_URL(model, _url_ify(vpath,fn), 'txt')
+	extn = '.txt'
+	fn, flag_found = _find_replace(fn, ('.odt','.fodt','.doc','.docx'), extn)
+	if flag_found:
+		return store_to_URL(model, _url_ify(vpath,fn), extn[1:])
 	return False
 
 def store_to_csv(model, vpath):
 	_, fn = _url_to_path_file(model.getURL())
 	#TODO: check type using model
-	if fn.find('.ods') > 0 or fn.find('.fods') > 0:
-		fn = fn.replace('.ods','.csv')
-		fn = fn.replace('.fods','.csv')
-		return store_to_URL(model, _url_ify(vpath,fn), 'csv')
+	extn = '.csv'
+	_fn, flag_found = _find_replace(fn, ('.ods','.fods','.xls','.xlsx'), extn)
+	if flag_found:
+		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
 	return False
 
 #--------------------------------------------------
@@ -224,6 +253,7 @@ def save_and_commit_version_git(model, vpath, msg=''):
 
 	# save a copy of LO file into path: as text file for ODT, as csv for ODS
 	store_to_text(model,vpath)
+	store_to_csv(model,vpath)
 
 	# git commit -am <msg>
 	repo = _get_repo(vpath)
