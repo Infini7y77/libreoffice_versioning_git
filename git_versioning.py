@@ -3,10 +3,10 @@
 #-=-=-=-=-=-=-=--=-=-=-=-=-=-=-
 # by harland.coles on 20180326
 #-=-=-=-=-=-=-=--=-=-=-=-=-=-=-
-__version__ = '20180328.0045'
+__version__ = '20180330.0145'
 """
 LibreOffice Python Marco:
-- Stores versions of current doc into a git repo using a similarily-named subdirectory
+- Stores versions of current doc into a git repo using a similarily-named sub-directory
 
 Notes
 ===========
@@ -16,13 +16,20 @@ https://cgit.freedesktop.org/libreoffice/core/tree/filter/source/config/fragment
 Requires:
 ===========
 - script needs to reside in, either:
-	- ${HOME}/.config/libreoffice/4-suse/user/Scripts/python/, or
+	- ${HOME}/.config/libreoffice/4-suse/user/Scripts/python/ (4-suse on openSUSE installs), or
 	- /usr/lib64/libreoffice/share/Scripts/python/
 
 - LibreOffice Uno Python addons
 - pygit2 -- requires compatible libgit2 library, eg libgit-26 for pygit2-26
 	$> zypper in libgit2 libgit2-devel
 	$> pip install pygit2==0.26.*
+
+TODO:
+===========
+- Prompt for commit message
+- Setup easy branching for story edit ideas
+- Get more info / properties from LO document model, like document type, created, etc
+
 """
 #-=-=-=-=-=-=-=--=-=-=-=-=-=-=-
 #import random
@@ -43,26 +50,27 @@ import pygit2 as git  # http://www.pygit2.org/, https://github.com/libgit2/pygit
 
 #--------------------------------------------------
 def get_lo_model():
+	"""Return the LO active document model"""
 	desktop = XSCRIPTCONTEXT.getDesktop()
 	model = desktop.getCurrentComponent()
 	return model
 
 def _url_to_path_file(url):
-	return os.path.split(url_unquote(url.replace('file://','')))
+	return os.path.split(url_unquote(url.replace('file://', '')))
 
-def _url_ify(path,fn):
-	return "file://{}".format(url_quote(os.path.join(path,fn)))
+def _url_ify(path, fn):
+	return "file://{}".format(url_quote(os.path.join(path, fn)))
 
 #--------------------------------------------------
 
 def _repo_path(vpath):
-	return os.path.join(vpath,'.git/')
+	return os.path.join(vpath, '.git/')
 
 def _get_repo(vpath):
 	return git.Repository(_repo_path(vpath))
 
 def check_git_repo(vpath):
-	""" """
+	"""Check for a valid Git Repository exists or not in Versioning directory"""
 	# use python git interface to check for valid repo in path dir
 	if os.access(_repo_path(vpath), os.R_OK):
 		try:
@@ -70,28 +78,27 @@ def check_git_repo(vpath):
 		except GitError as e:
 			if e.message.startswith('Repository not found'):
 				return False
-			else:
-				raise
+			raise
 		return True
 	return False
 
 def git_repo_init(vpath):
-	""" """
+	"""Initialize a Git Repository in the Versioning directory"""
 	# if path exists and git repo dNE, then .. else ?? return False? (or raise error?)
-	if check_git_repo(vpath) == False:
+	if not check_git_repo(vpath):
 		# git init
 		repo = git.init_repository(vpath, bare=False)
 
 		# create .gitignore
-		fn = os.path.join(vpath,'.gitignore')
+		fn = os.path.join(vpath, '.gitignore')
 		ts = "#.gitignore\n~*\n.~lock.*\n*.kate-swp\n"
-		with open(fn,'w') as fp:
+		with open(fn, 'w') as fp:
 			fp.write(ts)
 
 		# optionally? create local .gitconfig?
-		fn = os.path.join(vpath,'.gitconfig')
+		fn = os.path.join(vpath, '.gitconfig')
 		ts = "#.gitconfig\n"
-		with open(fn,'w') as fp:
+		with open(fn, 'w') as fp:
 			fp.write(ts)
 
 		repo.config.add_file(fn)
@@ -99,7 +106,7 @@ def git_repo_init(vpath):
 		_, fn = os.path.split(vpath)
 		# git add .
 		# git commit -m 'Initial Commit ;)'
-		oid = _git_commit_with_add(repo,'Initial Commit ;) in {}'.format(fn), init=True)
+		oid = _git_commit_with_add(repo, 'Initial Commit ;) in {}'.format(fn), init=True)
 
 		return repo
 	return False
@@ -111,7 +118,7 @@ def _git_commit(repo, msg, init=False):
 		user_name = repo.config['user.name']
 		user_email = repo.config['user.email']
 		author = git.Signature(user_name, user_email)
-		commiter = git.Signature('LibreOffice - Save Versions to Git: {}'.format(__version__), 'infini7y@yellow')
+		commiter = git.Signature('LibreOffice - Save Versions to Git(v{})'.format(__version__), 'infini7y@yellow')
 
 		tree = repo.index.write_tree()
 
@@ -138,59 +145,76 @@ def _git_commit_with_add(repo, msg, init=False):
 #--------------------------------------------------
 
 def _find_replace(sobj, find_items, replacement):
+	# Note: Order of items matter
 	flag_found = False
 	for wo in find_items:
 		if sobj.find(wo) > 0:
+			sobj = sobj.replace(wo, replacement)
 			flag_found = True
-			sobj = sobj.replace(wo,replacement)
 	return sobj, flag_found
 
 def _find_replace_pairs(sobj, find_replace_pairs):
+	# Note: Order of items matter
 	flag_found = False
-	for wo,wi in find_replace_pairs:
+	for wo, wi in find_replace_pairs:
 		if sobj.find(wo) > 0:
+			sobj = sobj.replace(wo, wi)
 			flag_found = True
-			sobj = sobj.replace(wo,wi)
 	return sobj, flag_found
 
 def get_versioning_dir_name(model, suffix='versions'):
-	""" """
-	# Filename used for versioning subdirectory name
+	"""Versioning Directory Name
+	Directory name based off of current LO document.
+	"""
+	# Filename used for versioning sub-directory name
 	path, fn = _url_to_path_file(model.getURL())
-	replace_what_with = ((' ','_'),
-					  ('.odt',''),('.fodt',''),
-					  ('.ods',''),('.fods',''),
-					  ('.doc',''),('.docx',''),
-					  )
-	_fn,_ = _find_replace_pairs(fn, replace_what_with)
+	_fn = fn.replace(' ', '_')
+
+	replace_what = ('.fodt', '.odt', '.fods', '.ods',
+					  '.docx', '.doc', '.xlsx', '.xls',)
+	_fn, _ = _find_replace(_fn, replace_what, '')
+
 	if path and _fn:
-		return os.path.join(path,'{}__{}'.format(_fn,suffix))
+		return os.path.join(path, '{}__{}'.format(_fn, suffix))
 	return None
 
 def setup_version_dir(vpath):
-	""" """
+	"""Setup Versioning Directory
+	Checks first for existence, and initiates creation if not found.
+	"""
 	if not vpath: return False
 
 	# Check existence first
 	if check_git_repo(vpath): return True
 
 	# if path dNE, then mkdir
-	if not os.access(vpath, os.F_OK): os.mkdir(vpath)
+	if not os.access(vpath, os.F_OK):
+		os.mkdir(vpath)
 
 	# if repo dNE, then Init
 	git_repo_init(vpath)
 
-	if os.access(vpath, os.R_OK) and check_git_repo(vpath): 	return True
+	if os.access(vpath, os.R_OK) and check_git_repo(vpath):
+		return True
 
 	return False
 
 #--------------------------------------------------
 
-FILTERS = { 'fodt' : 'OpenDocument Text Flat XML',  #writer_ODT_FlatXML
-			'fods' : 'OpenDocument Spreadsheet Flat XML',   #calc_ODS_FlatXML
-			'txt' : 'Text',
-			'csv' : 'Text - txt - csv (StarCalc)',
-			}
+FILTERS = {
+	'.fodt' : 'OpenDocument Text Flat XML',  #writer_ODT_FlatXML
+	'.fods' : 'OpenDocument Spreadsheet Flat XML',   #calc_ODS_FlatXML
+	'.txt' : 'Text',
+	'.csv' : 'Text - txt - csv (StarCalc)',
+	}
+
+STORE_TO_EXTN = {
+	'.fodt' : ('.fodt', '.odt', '.docx', '.doc'),
+	'.fods' : ('.fods', '.ods', '.xlsx', '.xls'),
+	'.txt' : ('.fodt', '.odt', '.docx', '.doc'),
+	'.csv' : ('.fods', '.ods', '.xlsx', '.xls'),
+	}
+
 
 def create_property(pname, pvalue):
 	p = PropertyValue()
@@ -201,46 +225,38 @@ def get_filter_as_property(filtertype):
 	return create_property('FilterName', FILTERS[filtertype])
 
 def store_to_URL(model, url, filtertype, overwrite=True, extra_properties=None):
-	""" """
+	"""Stores current LO document to vpath, resulting file depends on filtertype"""
 	props = [get_filter_as_property(filtertype), create_property('Overwrite', overwrite)]
-	if extra_properties is not None and isinstance(extra_properties,(list,tuple)):
-		for p in extra_properties:
-			if isinstance(p, PropertyValue):
-				props.append(p)
+	if extra_properties is not None:
+		props.extend([ p for p in extra_properties if isinstance(p, PropertyValue) ])
 	return model.storeToURL(url, tuple(props))
 
-def store_to_flat_XML(model, vpath):
+def store_to__by_extn(model, vpath, extn, fn_suffix=''):
+	"""Stores current LO document to vpath based on extension"""
 	_, fn = _url_to_path_file(model.getURL())
 	#TODO: check type using model
-	extn = '.fodt'
-	_fn, flag_found = _find_replace(fn, ('.odt','.fodt','.doc','.docx'), extn)
+	_fn, flag_found = _find_replace(fn, STORE_TO_EXTN[extn], extn)
+	if fn_suffix:
+		_fn = _fn.replace(extn, '_{}{}'.format(fn_suffix, extn))
 	if flag_found:
-		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
-
-	extn = '.fods'
-	_fn, flag_found = _find_replace(fn, ('.ods','.fods','.xls','.xlsx'), extn)
-	if flag_found:
-		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
-
+		return store_to_URL(model, _url_ify(vpath, _fn), extn)
 	return False
+
+def store_to_flat_XML(model, vpath):
+	"""Store current LO document to vpath, as a ODF flat XML file"""
+	return store_to__by_extn(model, vpath, '.fodt') or \
+		store_to__by_extn(model, vpath, '.fods') or False
 
 def store_to_text(model, vpath):
-	_, fn = _url_to_path_file(model.getURL())
-	#TODO: check type using model
-	extn = '.txt'
-	fn, flag_found = _find_replace(fn, ('.odt','.fodt','.doc','.docx'), extn)
-	if flag_found:
-		return store_to_URL(model, _url_ify(vpath,fn), extn[1:])
-	return False
+	"""Store current LO document to vpath, as a text document"""
+	return store_to__by_extn(model, vpath, '.txt')
 
 def store_to_csv(model, vpath):
-	_, fn = _url_to_path_file(model.getURL())
-	#TODO: check type using model
-	extn = '.csv'
-	_fn, flag_found = _find_replace(fn, ('.ods','.fods','.xls','.xlsx'), extn)
-	if flag_found:
-		return store_to_URL(model, _url_ify(vpath,_fn), extn[1:])
-	return False
+	"""Store current LO document to vpath, as a csv file"""
+	# TODO: Only does current sheet, how to do it for all sheets?
+	#   append sheet number or name to <filename>
+	#   get sheet info from model, how?
+	return store_to__by_extn(model, vpath, '.csv')
 
 #--------------------------------------------------
 
@@ -249,11 +265,11 @@ def save_and_commit_version_git(model, vpath, msg=''):
 	if not setup_version_dir(vpath): return False
 
 	# save a copy of LO file into path as flat XML
-	store_to_flat_XML(model,vpath)
+	store_to_flat_XML(model, vpath)
 
 	# save a copy of LO file into path: as text file for ODT, as csv for ODS
-	store_to_text(model,vpath)
-	store_to_csv(model,vpath)
+	store_to_text(model, vpath)
+	store_to_csv(model, vpath)
 
 	# git commit -am <msg>
 	repo = _get_repo(vpath)
@@ -265,7 +281,11 @@ def save_and_commit_version_git(model, vpath, msg=''):
 # LibreOffice Entry Functions
 
 def save_version_git(*args):
-	""" """
+	"""LibreOffice Macro Entry Point:
+	Save a copy of current LO document to a git working directory and commit changes.
+	Initiates git repository if none existing in working directory.
+	Working directory is a sub-directory in directory of current LO document.
+	"""
 	model = get_lo_model()
 	#print_to_textdoc(dir(model))
 
@@ -279,7 +299,7 @@ def save_version_git(*args):
 	save_and_commit_version_git(model, vpath, msg)
 
 def save_version_git_branch(*args):
-	""" """
+	"""LibreOffice Macro Entry Point: """
 	# Prompt for branch name
 	# check if branch exists, then create or goto
 	#git branch <branch>, or git checkout <branch>
@@ -287,7 +307,7 @@ def save_version_git_branch(*args):
 	pass
 
 def save_version_git_master(*args):
-	""" """
+	"""LibreOffice Macro Entry Point: """
 	#git checkout master
 	pass
 
@@ -300,21 +320,21 @@ g_exportedScripts = save_version_git,
 #--------------------------------------------------
 
 def print_to_textdoc(msg='x-x-x'):
-    model = get_lo_model()
+	"""Print Message into current LO Text document if exists"""
+	model = get_lo_model()
 
 	#check whether there's already an opened document. Otherwise, create a new one
-    if not hasattr(model, "Text"):
-        model = desktop.loadComponentFromURL(
-            "private:factory/swriter","_blank", 0, () )
+	if not hasattr(model, "Text"):
+		model = desktop.loadComponentFromURL("private:factory/swriter", "_blank", 0, () )
 
 	#get the XText interface
-    text = model.Text
+	text = model.Text
 	#create an XTextRange at the end of the document
-    tRange = text.End
+	tRange = text.End
 	#and set the string
-    tRange.String = "\n%s\n" % (msg)
+	tRange.String = "\n%s\n" % (msg)
 
-    return None
+	return None
 
 
 #--#--#--#--#--#--#--#--#--#--#--

@@ -1,3 +1,6 @@
 #.gitignore
 __*
 _logs/
+*.*swp
+*.bak
+*.pyc
