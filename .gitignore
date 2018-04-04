@@ -1,6 +1,8 @@
 #.gitignore
 __*
+!__init__.py
 _logs/
 *.*swp
 *.bak
+*.tmp
 *.pyc

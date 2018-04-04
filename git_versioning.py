@@ -33,8 +33,7 @@ TODO:
 """
 #-=-=-=-=-=-=-=--=-=-=-=-=-=-=-
 #import random
-
-import sys
+#import sys
 import os
 import datetime as dt
 from urllib.parse import (quote as url_quote, unquote as url_unquote)
@@ -49,11 +48,22 @@ import pygit2 as git  # http://www.pygit2.org/, https://github.com/libgit2/pygit
 
 
 #--------------------------------------------------
+# LIBREOFFICE Python Script Context
+
+if XSCRIPTCONTEXT is None:
+	raise Exception("Not running in LibreOffice python script context")
+
+def get_lo_desktop():
+	"""Return the LO active document context"""
+	return XSCRIPTCONTEXT.getDesktop()
+
 def get_lo_model():
 	"""Return the LO active document model"""
-	desktop = XSCRIPTCONTEXT.getDesktop()
-	model = desktop.getCurrentComponent()
-	return model
+	desktop = get_lo_desktop()
+	return desktop.getCurrentComponent()
+
+#--------------------------------------------------
+# LIBREOFFICE Functions
 
 def _url_to_path_file(url):
 	return os.path.split(url_unquote(url.replace('file://', '')))
@@ -61,7 +71,87 @@ def _url_to_path_file(url):
 def _url_ify(path, fn):
 	return "file://{}".format(url_quote(os.path.join(path, fn)))
 
+# Ref: https://cgit.freedesktop.org/libreoffice/core/tree/filter/source/config/fragments/filters
+FILTERS = {
+	'.fodt' : 'OpenDocument Text Flat XML',          #writer_ODT_FlatXML
+	'.fods' : 'OpenDocument Spreadsheet Flat XML',   #calc_ODS_FlatXML
+	'.fodp' : 'OpenDocument Presentation Flat XML',  #impress_ODP_FlatXML
+	'.fodg' : 'OpenDocument Drawing Flat XML',       #draw_ODG_FlatXML
+	'.txt' : 'Text',
+	'.csv' : 'Text - txt - csv (StarCalc)',
+	#'.html' : 'XHTML Writer File'  #XHTML_File
+	#'.html' : 'XHTML Calc File'
+	}
+
+STORE_TO_EXTN = {
+	'.fodt' : ('.fodt', '.odt', '.docx', '.doc'),
+	'.fods' : ('.fods', '.ods', '.xlsx', '.xls'),
+	'.fodp' : ('.fodp', '.odp', '.pptx', '.ppt'),
+	'.fodg' : ('.fodg', '.odg'),
+	'.txt' : ('.fodt', '.odt', '.docx', '.doc'),
+	'.csv' : ('.fods', '.ods', '.xlsx', '.xls'),
+	#'.html' : ('.fodt', '.odt', '.docx', '.doc'),
+	#'.html' : ('.fods', '.ods', '.xlsx', '.xls', '.fodp', '.odp', '.pptx', '.ppt', '.fodg', '.odg'),
+	}
+
+
+def create_property(pname, pvalue):
+	p = PropertyValue()
+	p.Name, p.Value = pname, pvalue
+	return p
+
+def get_filter_as_property(filtertype):
+	return create_property('FilterName', FILTERS[filtertype])
+
+def store_to_URL(model, url, filtertype, overwrite=True, extra_properties=None):
+	"""Stores current LO document to vpath, resulting file depends on filtertype"""
+	props = [get_filter_as_property(filtertype), create_property('Overwrite', overwrite)]
+	if extra_properties is not None:
+		props.extend([ p for p in extra_properties if isinstance(p, PropertyValue) ])
+	return model.storeToURL(url, tuple(props))
+
+def store_to__by_extn(model, vpath, extn, fn_suffix=''):
+	"""Stores current LO document to vpath based on extension"""
+	_, fn = _url_to_path_file(model.getURL())
+	#TODO: check type using model?
+	_fn, extn_found = _find_replace(fn, STORE_TO_EXTN[extn], extn)
+	if fn_suffix:
+		_fn = _fn.replace(extn, '_{}{}'.format(fn_suffix, extn))
+	if extn_found:
+		return store_to_URL(model, _url_ify(vpath, _fn), extn)
+	return False
+
+def store_to_flat_XML(model, vpath):
+	"""Store current LO document to vpath, as a ODF flat XML file"""
+	return store_to__by_extn(model, vpath, '.fodt') or \
+		store_to__by_extn(model, vpath, '.fods') or False
+
+def store_to_text(model, vpath):
+	"""Store current LO document to vpath, as a text document"""
+	if hasattr(model, "Text"):
+		return store_to__by_extn(model, vpath, '.txt')
+	return False
+
+def store_to_csv(model, vpath):
+	"""Store current LO document to vpath, as a csv file"""
+	# TODO: Only does current sheet, how to do it for all sheets?
+	#   append sheet number or name to <filename>
+	#   get sheet info from model, how?
+	return store_to__by_extn(model, vpath, '.csv')
+
+def create_new_lo_writer_document():
+	"""Returns LO document model of new writer document"""
+	desktop = desktop = get_lo_desktop()
+	return desktop.loadComponentFromURL("private:factory/swriter", "_blank", 0, ())
+
+#TODO: Untested
+def create_new_lo_calc_document():
+	"""Returns LO document model of new calc document"""
+	desktop = desktop = get_lo_desktop()
+	return desktop.loadComponentFromURL("private:factory/scalc", "_blank", 0, ())
+
 #--------------------------------------------------
+# GIT Functions
 
 def _repo_path(vpath):
 	return os.path.join(vpath, '.git/')
@@ -75,7 +165,8 @@ def check_git_repo(vpath):
 	if os.access(_repo_path(vpath), os.R_OK):
 		try:
 			repo = git.Repository(_repo_path(vpath))
-		except GitError as e:
+			repo.status()
+		except git.GitError as e:
 			if e.message.startswith('Repository not found'):
 				return False
 			raise
@@ -118,7 +209,8 @@ def _git_commit(repo, msg, init=False):
 		user_name = repo.config['user.name']
 		user_email = repo.config['user.email']
 		author = git.Signature(user_name, user_email)
-		commiter = git.Signature('LibreOffice - Save Versions to Git(v{})'.format(__version__), 'infini7y@yellow')
+		commiter = git.Signature('LibreOffice - Save Versions to Git(v{})'.format(__version__),
+						   'infini7y@yellow')
 
 		tree = repo.index.write_tree()
 
@@ -199,69 +291,10 @@ def setup_version_dir(vpath):
 
 	return False
 
-#--------------------------------------------------
-
-FILTERS = {
-	'.fodt' : 'OpenDocument Text Flat XML',  #writer_ODT_FlatXML
-	'.fods' : 'OpenDocument Spreadsheet Flat XML',   #calc_ODS_FlatXML
-	'.txt' : 'Text',
-	'.csv' : 'Text - txt - csv (StarCalc)',
-	}
-
-STORE_TO_EXTN = {
-	'.fodt' : ('.fodt', '.odt', '.docx', '.doc'),
-	'.fods' : ('.fods', '.ods', '.xlsx', '.xls'),
-	'.txt' : ('.fodt', '.odt', '.docx', '.doc'),
-	'.csv' : ('.fods', '.ods', '.xlsx', '.xls'),
-	}
-
-
-def create_property(pname, pvalue):
-	p = PropertyValue()
-	p.Name, p.Value = pname, pvalue
-	return p
-
-def get_filter_as_property(filtertype):
-	return create_property('FilterName', FILTERS[filtertype])
-
-def store_to_URL(model, url, filtertype, overwrite=True, extra_properties=None):
-	"""Stores current LO document to vpath, resulting file depends on filtertype"""
-	props = [get_filter_as_property(filtertype), create_property('Overwrite', overwrite)]
-	if extra_properties is not None:
-		props.extend([ p for p in extra_properties if isinstance(p, PropertyValue) ])
-	return model.storeToURL(url, tuple(props))
-
-def store_to__by_extn(model, vpath, extn, fn_suffix=''):
-	"""Stores current LO document to vpath based on extension"""
-	_, fn = _url_to_path_file(model.getURL())
-	#TODO: check type using model
-	_fn, flag_found = _find_replace(fn, STORE_TO_EXTN[extn], extn)
-	if fn_suffix:
-		_fn = _fn.replace(extn, '_{}{}'.format(fn_suffix, extn))
-	if flag_found:
-		return store_to_URL(model, _url_ify(vpath, _fn), extn)
-	return False
-
-def store_to_flat_XML(model, vpath):
-	"""Store current LO document to vpath, as a ODF flat XML file"""
-	return store_to__by_extn(model, vpath, '.fodt') or \
-		store_to__by_extn(model, vpath, '.fods') or False
-
-def store_to_text(model, vpath):
-	"""Store current LO document to vpath, as a text document"""
-	return store_to__by_extn(model, vpath, '.txt')
-
-def store_to_csv(model, vpath):
-	"""Store current LO document to vpath, as a csv file"""
-	# TODO: Only does current sheet, how to do it for all sheets?
-	#   append sheet number or name to <filename>
-	#   get sheet info from model, how?
-	return store_to__by_extn(model, vpath, '.csv')
-
-#--------------------------------------------------
-
 def save_and_commit_version_git(model, vpath, msg=''):
-	""" """
+	"""Store LO document to ODF Flat XML, and text or csv.
+	Creates versioning directory and git initial repository if none exists
+	"""
 	if not setup_version_dir(vpath): return False
 
 	# save a copy of LO file into path as flat XML
@@ -325,7 +358,7 @@ def print_to_textdoc(msg='x-x-x'):
 
 	#check whether there's already an opened document. Otherwise, create a new one
 	if not hasattr(model, "Text"):
-		model = desktop.loadComponentFromURL("private:factory/swriter", "_blank", 0, () )
+		model = create_new_lo_writer_document()
 
 	#get the XText interface
 	text = model.Text
@@ -338,10 +371,12 @@ def print_to_textdoc(msg='x-x-x'):
 
 
 #--#--#--#--#--#--#--#--#--#--#--
-# Testing:  Use unittest
+# Testing:  Use unittest(?)
+# - Deploy to LO python script directory,
+# - open new or an example ODT, or ODS,
+# - run save_version_git macro
 
 
-
-
-
+# vim: ts=4 sw=4 sts=4 noexpandtab
+# kate: indent-mode python; indent-width 4; tab-width 4; _replace-tabs on;
 #eof

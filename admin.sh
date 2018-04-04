@@ -3,7 +3,7 @@ thisName=$(basename $0)
 die(){ echo "$@" >&2; exit 1; }
 
 usage(){
-	echo "Usage: ${thisName} (clean-up | spruce-up | deploy | save [<msg>])"
+	echo "Usage: ${thisName} (spruce-up | clean | save [<msg>] | deploy)"
 }
 
 flag_verbose=1
@@ -30,29 +30,52 @@ object_files='git_versioning.py'
 install_dir="${HOME}/.config/libreoffice/4-suse/user/Scripts/python/"
 
 commit_msg=''
-
+clean_reports=''
 #----------------
+
+clean_reports="${clean_reports} pylint"
+pylint_er(){
+	logThis " Pylint..er"
+	local _app="pylint"
+	[ -x "/usr/bin/${_app}" ] && ${_app} *.py > __${_app}_report.txt 2> __${_app}_errors.txt
+}
+
+lint__fix_up_commas(){
+	logThis "Fixing comma spaces"
+	for f in *.py; do
+		sed -i -e 's/,\b/, /g' -e "s/,'/, '/g" -e 's/,"/, "/g' "$f"
+	done
+}
+
+lint__tabs_to_spaces(){
+	logThis "Tabs to Spaces"
+	for f in *.py; do
+		sed -e 's/\t/    /g' "$f" > "${f}__no-tabs.tmp"
+	done
+}
+
+clean_reports="${clean_reports} pyflakes"
+pyflakes_er(){
+	logThis "Pyflakes..er"
+	local _app="pyflakes"
+	[ -x "/usr/bin/${_app}" ] && ${_app} *.py > __${_app}_report.txt 2> __${_app}_errors.txt
+}
+
+spruce_up(){
+	logThis "Sprucing up, sweep..sweep..."
+	lint__fix_up_commas
+	#lint__tabs_to_spaces
+	pylint_er
+	pyflakes_er
+}
 
 clean_up(){
 	logThis "Cleaning up directory"
 	rm -I *.pyc >/dev/null 2>&1
-	[ -e __pylint_report.txt ] && rm -I __pylint_*.txt
-}
-
-spruce_py(){
-	logThis "Sprucing up, sweep..sweep..."
-	for f in *.py; do
-		#fixup those commas
-		sed -i -e 's/,\b/, /g' -e "s/,'/, '/g" -e 's/,"/, "/g' "$f"
+	rm -I *.tmp >/dev/null 2>&1
+	for item in $clean_reports; do
+		[ -e "__${item}_report.txt" ] && rm -I __${item}_*.txt
 	done
-
-	logThis " Pylint..er"
-	pylint *.py > __pylint_report.txt 2> __pylint_errors.txt
-}
-
-deploy(){
-	logThis "Deploying"
-	cp -a $object_files "${install_dir}"
 }
 
 save_to_git(){
@@ -61,16 +84,30 @@ save_to_git(){
 	[ -n "$commit_msg" ] && git commit -m "$commit_msg"
 }
 
+deploy(){
+	logThis "Deploying"
+	#TODO: Check if dst is older than src
+	for f in $object_files; do
+		cp -a "$f" "${install_dir}"
+	done
+}
+
 #----------------
 
+#while [ $# -gt 0 ]; do
 case "$1" in
-	"clean-up") clean_up ;;
-	"spruce-up") spruce_py ;;
-	"deploy") deploy ;;
+	"spruce-up") spruce_up ;;
+	"no-tabs") lint__tabs_to_spaces ;;
+	"pylint") pylint_er ;;
+	"pyflakes") pyflakes_er ;;
+	#
+	"clean") clean_up ;;
 	"save") commit_msg="$2"; shift; save_to_git ;;
+	"deploy") deploy ;;
 	*) usage; die "Error: Unknown command: $1" ;;
 esac
 shift
+#done
 
 exit 0
 #eof

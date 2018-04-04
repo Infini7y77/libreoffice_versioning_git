@@ -1,6 +1,6 @@
-==================================
+=========================================
  README - Libreoffice Versioning In Git
-==================================
+=========================================
  .. kate: syntax RestructuredText HRC;
 :by: harland.coles
 :dt: 20180326
@@ -17,7 +17,7 @@ To store versioning of Libreoffice / ODF Documents in a git repository.
 INSTALL
 +++++++++++++++
 To Install, copy 'git_versioning.py' into, either:
-- ${HOME}/.config/libreoffice/4-suse/user/Scripts/python/, or
+- ${HOME}/.config/libreoffice/4-suse/user/Scripts/python/ ('4-suse' : on openSUSE install), or
 - /usr/lib64/libreoffice/share/Scripts/python/
 
 Requires:
